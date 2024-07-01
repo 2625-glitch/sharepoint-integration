@@ -12,20 +12,19 @@ import com.microsoft.graph.requests.DriveItemCollectionPage;
 import com.microsoft.graph.requests.GraphServiceClient;
 import okhttp3.Request;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -146,60 +145,57 @@ public class SharePointService {
                 .delete();
     }
 
-    public String createSubscription(String folderId, String notificationUrl, String clientState) {
-        Subscription subscription = new Subscription();
-        subscription.changeType = "updated,created,deleted";
-        subscription.notificationUrl = notificationUrl;
-        subscription.resource = "/sites/" + sharePointConfig.getSiteId() + "/drives/" + sharePointConfig.getDriveId() + "/items/" + folderId;
-        subscription.expirationDateTime = OffsetDateTime.now().plusDays(2); // Subscriptions can last for a maximum of 4320 minutes (about 3 days)
-        subscription.clientState = clientState;
 
-        Subscription createdSubscription = graphClient.subscriptions()
-                .buildRequest()
-                .post(subscription);
+    public List<Map<String, Object>> fetchDeltaChanges(String deltaLink) {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + getAccessToken());
+        HttpEntity<String> entity = new HttpEntity<>(headers);
 
-        currentSubscriptionId = createdSubscription.id; // Store the subscription ID
+        ResponseEntity<Map> response = restTemplate.exchange(deltaLink, HttpMethod.GET, entity, Map.class);
 
-        return createdSubscription.id;
-    }
+        if (response.getStatusCode() == HttpStatus.OK) {
+            Map<String, Object> body = response.getBody();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> delta = (List<Map<String, Object>>) body.get("value");
 
-    public void renewSubscription(String subscriptionId) {
-        Subscription subscription = new Subscription();
-        subscription.expirationDateTime = OffsetDateTime.now().plusDays(2);
-
-        graphClient.subscriptions(subscriptionId)
-                .buildRequest()
-                .patch(subscription);
-    }
-
-    @Scheduled(fixedRate = 2 * 24 * 60 * 60 * 1000) // Run every 2 days
-    public void renewCurrentSubscription() {
-        if (currentSubscriptionId != null) {
-            renewSubscription(currentSubscriptionId);
-        }
-    }
-
-    public void initializeSubscription() {
-        String folderId = "your-folder-id";
-        String notificationUrl = "http://localhost:8080/api/notifications/webhook";
-        String clientState = "SecretClientState";
-
-        Optional<String> existingSubscriptionId = checkExistingSubscription();
-
-        if (existingSubscriptionId.isPresent()) {
-            currentSubscriptionId = existingSubscriptionId.get();
-            renewSubscription(currentSubscriptionId);
+            return delta != null ? delta : List.of();
         } else {
-            currentSubscriptionId = createSubscription(folderId, notificationUrl, clientState);
+            throw new RuntimeException("Error fetching delta changes: " + response.getStatusCode() + " " + response.getBody());
         }
     }
 
-    private Optional<String> checkExistingSubscription() {
-        if(currentSubscriptionId!=null) {
-            return currentSubscriptionId.describeConstable();
+    public String getAccessToken() {
+        String tenantId = sharePointConfig.getTenantId();
+        String clientId = sharePointConfig.getClientId();
+        String clientSecret = sharePointConfig.getClientSecret();
+        String scope = "https://graph.microsoft.com/.default";
+        String tokenUrl = "https://login.microsoftonline.com/" + tenantId + "/oauth2/v2.0/token";
+
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED);
+
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("client_id", clientId);
+        body.add("scope", scope);
+        body.add("client_secret", clientSecret);
+        body.add("grant_type", "client_credentials");
+
+        HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(body, headers);
+        ResponseEntity<Map> response = restTemplate.exchange(tokenUrl, HttpMethod.POST, entity, Map.class);
+
+        if (response.getStatusCode() == HttpStatus.OK) {
+            Map<String, Object> responseBody = response.getBody();
+            return (String) responseBody.get("access_token");
+        } else {
+            throw new RuntimeException("Error fetching access token: " + response.getStatusCode() + " " + response.getBody());
         }
-        return Optional.empty();
-    }
+
+
+}
+
+
 
 
 }

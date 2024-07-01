@@ -5,13 +5,13 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class SharePointConfig {
-    @Value("${sharepoint.client-id}")
+    @Value("${azure.client-id}")
     private String clientId;
 
-    @Value("${sharepoint.client-secret}")
+    @Value("${azure.client-secret}")
     private String clientSecret;
 
-    @Value("${sharepoint.tenant-id}")
+    @Value("${azure.tenant-id}")
     private String tenantId;
 
     @Value("${sharepoint.site-id}")
@@ -19,6 +19,17 @@ public class SharePointConfig {
 
     @Value("${sharepoint.drive-id}")
     private String driveId;
+
+    public String getFolderId() {
+        return folderId;
+    }
+
+    public void setFolderId(String folderId) {
+        this.folderId = folderId;
+    }
+
+    @Value("${sharepoint.folder-id}")
+    private String folderId;
 
     public String getClientId() {
         return clientId;
